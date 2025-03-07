@@ -33,47 +33,25 @@ internal static class Injector
     /// </summary>
     /// <returns>The process id of the first matching process.</returns>
     /// <exception cref="Exception">If found invalid osu! process or no process at all.</exception>
-    private static uint GetOsuPid()
+        private static uint GetOsuPid()
     {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "ps",
-            Arguments = "-e -o pid,command",
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        using var mgmt = new ManagementClass("Win32_Process");
+        using var processes = mgmt.GetInstances();
 
-        using (var process = Process.Start(startInfo))
+        foreach (var process in processes)
         {
-            using (var reader = process.StandardOutput)
-            {
-                string output = reader.ReadToEnd();
-                foreach (var line in output.Split('\n'))
-                {
-                    if (string.IsNullOrWhiteSpace(line))
-                        continue;
-                    
-                    var parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length < 2)
-                        continue;
-                    
-                    var pid = uint.Parse(parts[0]);
-                    var command = parts[1];
+            var exe = (string)process["Name"];
+            var pid = (uint)process["ProcessId"];
+            var cli = (string)process["CommandLine"];
 
-                    if (command == "osu!" || command.Contains("osu!.exe"))
-                    {
-                        if (line.Contains("-devserver") && !line.contains("ppy.sh"))
-                        {
-                            return pid;
-                        }
-                        else
-                        {
-                            throw new Exception("Will not inject into osu! connected to Bancho!");
-                        }
-                    }
-                }
-            }
+            if (exe != "osu!.exe") continue;
+
+            // Make sure devserver arg is present and not pointing to ppy.sh
+            var args = cli.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (args is not [_, "-devserver", { Length: > 3 }] || args is [_, "-devserver", "ppy.sh"])
+                throw new Exception("Will not inject into osu! connected to Bancho!");
+
+            return pid;
         }
 
         throw new Exception("Cannot find a running osu! process!");
